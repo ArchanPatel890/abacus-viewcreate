@@ -1,0 +1,19 @@
+{
+  "name": "abacus-viewcreate",
+  "version": "0.0.1",
+  "description": "This is a module that can be used to insert views in an abacus database.",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ArchanPatel890/abacus-viewcreate.git"
+  },
+  "author": "Archan B. Patel",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ArchanPatel890/abacus-viewcreate/issues"
+  },
+  "homepage": "https://github.com/ArchanPatel890/abacus-viewcreate#readme"
+}
