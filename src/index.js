@@ -8,10 +8,14 @@
 
 const _ = require('underscore');
 const partition = require('abacus-partition');
-const tranform = require('abacus-tranform');
+const transform = require('abacus-transform');
 const perf = require('abacus-perf');
 const PouchDB = require('pouchdb');
 const debug = require('abacus-debug')('abacus-viewcreate');
+const couchclient = require('abacus-couchclient');
+
+const key = couchclient.k;
+const time = couchclient.t;
 
 const flatten = _.flatten;
 const map = _.map;
@@ -32,13 +36,22 @@ const error = (err) => {
   return err;
 };
 
-// Adds the design doc to each database specified by the options.
-const designDocCouch = function(couchclient, dbopt, op, docs, opt) {
-  // Get the key to determine the bucket of the database.
-  const k = key(docs[0]._id) ? key(docs[0]._id) === key(docs[1]._id) ?
-    key(docs[0]._id) : undefined : undefined;
+const puri = (u) => {
+  return u.replace(/\/\/[^:]+:[^@]+@/, '//***:***@');
+};
 
-  const opfunction = function(err, dbs) => {
+// Adds the design doc to each database specified by the options.
+const designDocCouch = function(dbopt, op, docs, opt, cb) {
+  const lcb = (err, res) => {
+    if(err) {
+      debug('Range db op failed, error %o', err);
+      cb(err, res);
+      return;
+    }
+    cb(undefined, res);
+  };
+
+  const opfunction = function(err, dbs) {
     if(err) {
       lcb(err);
       return;
@@ -71,17 +84,19 @@ const designDocCouch = function(couchclient, dbopt, op, docs, opt) {
           rcb(undefined, opt.limit ? accum.concat(first(sr, opt.limit
             - accum.length + skip)) : accum.concat(sr));
         });
-      else
+      else {
+        debug('Running operation in db %s', db._db_name);
         op(db, docs, opt.limit ? extend({}, opt, {
           limit: opt.limit - accum.length + skip
         }) : opt,
           (err, rows) => err ? rcb(err) : rcb(undefined, accum.concat(rows)));
+      }
     }, [], lcb);
   }
 
   const partitions = [];
   const pool = function(dbopt, p, rw, cb) {
-    if(Array.isArray(pars[0]))
+    if(Array.isArray(p[0]))
       return transform.map(p, (v, i, p, mcb) => {
         const u = dbopt.uri(v);
         debug('Using db %s in %s mode', puri(u), rw);
@@ -146,29 +161,52 @@ const designDocCouch = function(couchclient, dbopt, op, docs, opt) {
     });
   }
 
-  // Find the date-bucket pairs for the databases [YYYYMM, bucket]
-  const time = couchclient.time;
-  partitioner(k, [ time(opt.startKey), time(opt.endKey) ], 'write',
+  // Get the key to determine the bucket of the database.
+  const k = key(opt.startkey) ? key(opt.endkey) === key(opt.startkey) ?
+    key(opt.startkey) : undefined : undefined;
+
+  dbopt.partitioner(k, [ time(opt.startkey), time(opt.endkey) ], 'write',
     (err, pars) => {
       err ? cb(err): transform.map(pars, (p, i, pars, pcb) =>
-        pool(p, 'write', pcb), opfunction)
+        pool(dbopt, p, 'write', pcb), opfunction)
     });
 }
 
-const addDesignDoc = function(couchclient, dbopt, docs, opt, cb) {
+const addDesignDocs = function(dbopt, docs, opt, cb) {
   const op = function(db, docs, opt, cb) {
-    db.bulkDocs(docs, opt,
-      (err, res) => err ? cb(error(err)) : cb(null, res));
+    debug('called bulkDocs, with' + db, docs);
+    db.bulkDocs(docs, opt, (err, res) => {
+      console.log(res);
+      err ? cb(debug(err)) : cb(null, res)
+    });
   }
 
-  designDocCouch(couchclient, dbopt, op, docs, opt);
+  designDocCouch(dbopt, op, docs, opt, cb);
 }
 
-const removeDesignDoc = function(couchclient, dbopt, docs, opt, cb) {
-  const op = function(db, docs, opt, cb) {
-    db.bulkDocs(docs, opt,
-      (err, res) => err ? cb(error(err)) : cb(null, res));
+const removeDesignDoc = function(dbopt, doc, opt, cb) {
+  const op = function(db, doc, opt, cb) {
+    db.get(doc, (err, doc) => {
+      err ? cb(err) :
+      db.remove(doc, (err, res) => {
+        err ? cb(err) : cb(null, response);
+      });
+    });
   }
 
-  designDocCouch(couchclient, dbopt, op, docs, opt);
+  designDocCouch(dbopt, op, doc, opt, cb);
 }
+
+const queryDesignDoc = function(dbopt, name, opt, cb) {
+  const op = function(db, name, opt, cb) {
+    db.query(name, opt, (err, docs) => {
+      err ? cb(err) : cb(undefined, docs);
+    });
+  }
+
+  designDocCouch(dbopt, op, doc, opt, cb);
+}
+
+module.exports.addDesignDoc = addDesignDocs;
+module.exports.removeDesignDoc = removeDesignDoc;
+module.exports.queryDesignDoc = queryDesignDoc;
