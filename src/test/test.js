@@ -13,7 +13,8 @@ const partitioner = partition.partitioner(
     partition.bucket,
     partition.period,
     partition.forward,
-    partition.balance
+    partition.balance,
+    true
    );
 
 var db = dbclient(
@@ -66,6 +67,17 @@ const opt = {
   startkey: 'k/' + 'a' + '/t/' + exTime,
 }
 
-viewCreate.addDesignDoc(db, dbopt, desDocs, opt, (err, res) => {
-  console.log('CALLED CB' + res);
+viewCreate.addDesignDoc(dbopt, desDocs, opt, (err, res) => {
+  console.log('CALLED CB' + JSON.stringify(res));
 });
+
+viewCreate.queryDesignDoc(
+  dbopt, 'example/by_title', opt, (err, res) => {
+  console.log('QUERY: ' + JSON.stringify(res));
+});
+
+
+viewCreate.removeDesignDoc(
+  dbopt, '_design/example', opt, (err, res) => {
+    console.log("REMOVE: " + JSON.stringify(res));
+  });

@@ -41,7 +41,7 @@ const puri = (u) => {
 };
 
 // Adds the design doc to each database specified by the options.
-const designDocCouch = function(dbopt, op, docs, opt, cb) {
+const designDocCouch = function(dbopt, op, mode, docs, opt, cb) {
   const lcb = (err, res) => {
     if(err) {
       debug('Range db op failed, error %o', err);
@@ -52,6 +52,9 @@ const designDocCouch = function(dbopt, op, docs, opt, cb) {
   };
 
   const opfunction = function(err, dbs) {
+    var opt2 = extend({}, opt);
+    opt2.startkey = undefined;
+    opt2.endkey = undefined;
     if(err) {
       lcb(err);
       return;
@@ -66,11 +69,12 @@ const designDocCouch = function(dbopt, op, docs, opt, cb) {
       // If db is an array, search in all dbs.
       if(Array.isArray(db))
         transform.map(db, (v, i, l, mcb) => {
+            debug(db);
           debug('Running operation in db %s', v._db_name);
-          op(v, docs, opt.limit ? extend({}, opt, {
+          op(v, docs, opt.limit ? extend({}, opt2, {
             limit: opt.limit - accum.length + skip,
             skip: 0
-          }) : extend({}, opt, { skip: 0 }),
+          }) : extend({}, opt2, { skip: 0 }),
           (err, rows) => err ? mcb(err) : mcb(undefined, rows));
         }, (err, rows) => {
           if(err) {
@@ -78,17 +82,22 @@ const designDocCouch = function(dbopt, op, docs, opt, cb) {
             return;
           }
           // Flatten the rows from dbs and sort them.
-          const sr = opt.descending ? sortBy(flatten(rows, true),
-          (r) => r.id).reverse() : sortBy(flatten(rows, true), (r) => r.id);
-          debug(sr);
-          rcb(undefined, opt.limit ? accum.concat(first(sr, opt.limit
-            - accum.length + skip)) : accum.concat(sr));
+          try {
+            const sr = opt.descending ? sortBy(flatten(rows, true),
+            (r) => r.id).reverse() : sortBy(flatten(rows, true), (r) => r.id);
+            debug(sr);
+            rcb(undefined, opt.limit ? accum.concat(first(sr, opt.limit
+              - accum.length + skip)) : accum.concat(sr));
+          } catch(err) {
+            debug(err);
+            rcb(undefined);
+          }
         });
       else {
-        debug('Running operation in db %s', db._db_name);
-        op(db, docs, opt.limit ? extend({}, opt, {
+        debug('Running operation in db %s' + JSON.stringify(opt2), db._db_name);
+        op(db, docs, opt.limit ? extend({}, opt2, {
           limit: opt.limit - accum.length + skip
-        }) : opt,
+        }) : opt2,
           (err, rows) => err ? rcb(err) : rcb(undefined, accum.concat(rows)));
       }
     }, [], lcb);
@@ -165,48 +174,52 @@ const designDocCouch = function(dbopt, op, docs, opt, cb) {
   const k = key(opt.startkey) ? key(opt.endkey) === key(opt.startkey) ?
     key(opt.startkey) : undefined : undefined;
 
-  dbopt.partitioner(k, [ time(opt.startkey), time(opt.endkey) ], 'write',
+  dbopt.partitioner(k, [ time(opt.startkey), time(opt.endkey) ], mode,
     (err, pars) => {
       err ? cb(err): transform.map(pars, (p, i, pars, pcb) =>
-        pool(dbopt, p, 'write', pcb), opfunction)
+        pool(dbopt, p, mode, pcb), opfunction)
     });
 }
 
-const addDesignDocs = function(dbopt, docs, opt, cb) {
-  const op = function(db, docs, opt, cb) {
-    debug('called bulkDocs, with' + db, docs);
+module.exports = function(uri, dbcons, partitioner) {
+  const queryOp = function(db, name, opt, cb) {
+    db.query(name, opt, (err, docs) => {
+      err ? cb(debug(err)) : cb(undefined, docs);
+    });
+  }
+
+  const rangeAdd = function(db, docs, opt, cb) {
     db.bulkDocs(docs, opt, (err, res) => {
       console.log(res);
       err ? cb(debug(err)) : cb(null, res)
     });
   }
 
-  designDocCouch(dbopt, op, docs, opt, cb);
-}
-
-const removeDesignDoc = function(dbopt, doc, opt, cb) {
-  const op = function(db, doc, opt, cb) {
+  const rangeRemove = function(db, doc, opt, cb) {
     db.get(doc, (err, doc) => {
-      err ? cb(err) :
+      debug('Found document: ' + doc);
+      err ? cb(err, debug(err)) :
       db.remove(doc, (err, res) => {
-        err ? cb(err) : cb(null, response);
+        err ? cb(debug(err)) : cb(null, res);
       });
     });
   }
 
-  designDocCouch(dbopt, op, doc, opt, cb);
-}
-
-const queryDesignDoc = function(dbopt, name, opt, cb) {
-  const op = function(db, name, opt, cb) {
-    db.query(name, opt, (err, docs) => {
-      err ? cb(err) : cb(undefined, docs);
-    });
+  const dbopt = {
+    uri: uri,
+    cons: dbcons,
+    partitioner: partitioner
   }
 
-  designDocCouch(dbopt, op, doc, opt, cb);
+  return {
+    query: function(name, opt, cb) {
+      designDocCouch(dbopt, queryOp, 'read', name, opt, cb);
+    },
+    range_add: function(docs, opt, cb) {
+      designDocCouch(dbopt, rangeAdd, 'write', docs, opt, cb);
+    },
+    range_remove: function(docs, opt, cb) {
+      designDocCouch(dbopt, rangeRemove, 'write', docs, opt, cb);
+    }
+  }
 }
-
-module.exports.addDesignDoc = addDesignDocs;
-module.exports.removeDesignDoc = removeDesignDoc;
-module.exports.queryDesignDoc = queryDesignDoc;
