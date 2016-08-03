@@ -40,7 +40,7 @@ const puri = (u) => {
   return u.replace(/\/\/[^:]+:[^@]+@/, '//***:***@');
 };
 
-// Adds the design doc to each database specified by the options.
+// Performs the operation to each database specified by the options.
 const designDocCouch = function(dbopt, op, mode, docs, opt, cb) {
   const lcb = (err, res) => {
     if(err) {
@@ -90,7 +90,7 @@ const designDocCouch = function(dbopt, op, mode, docs, opt, cb) {
               - accum.length + skip)) : accum.concat(sr));
           } catch(err) {
             debug(err);
-            rcb(undefined);
+            rcb(undefined, rows);
           }
         });
       else {
